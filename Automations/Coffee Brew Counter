@@ -1,0 +1,150 @@
+blueprint:
+  name: "Coffee Brew Counter"
+  description: Counts number of cups of coffee based on energy consumption.
+    Built from my Siemens/Bosch filter brewer with water pump.
+    The sequence is as follows.
+    Starts with a power spike, falls below a threshold value,then starts the pump heating cycles.
+    Once all water is pumped, pump turns of and only keeping hot.
+  domain: automation
+  input:
+    power_sensor:
+      name: "Energy sensor for coffee maker"
+      description: "Select the sensor that measures the coffee maker's energy consumption."
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+    start_appliance_power:
+      name: Start - Appliance Power Setpoint
+      default: 1300
+      selector:
+        number:
+          min: 1.0
+          max: 3000.0
+          step: 1.0
+          unit_of_measurement: watts
+          mode: slider
+    start_time_delay:
+      name: Start - Power Time Delay
+      default: 1
+      selector:
+        number:
+          min: 0.5
+          max: 10
+          step: 0.5
+          unit_of_measurement: seconds
+          mode: slider
+    input_number_cups:
+      name: "Input Number for number of cups"
+      description: "Select an input_number to store the number of cups."
+      selector:
+        entity:
+          domain: input_number
+    heating_threshold:
+      name: "Power threshold for heating"
+      default: 1280
+      selector:
+        number:
+          min: 50
+          max: 2500
+          step: 10
+          unit_of_measurement: W
+    pump_threshold:
+      name: "Power threshold for pump shutdown"
+      default: 80
+      selector:
+        number:
+          min: 10
+          max: 200
+          step: 1
+          unit_of_measurement: W
+    pump_off_time_delay:
+      name: "Time delay for pump shutdown"
+      description: "How many seconds the power must be below the pump threshold to count as pumping being completed."
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: seconds
+          mode: slider
+    time_per_cup:
+      name: "Seconds per cup"
+      default: 86
+      selector:
+        number:
+          min: 30
+          max: 300
+          step: 1
+          unit_of_measurement: s
+    notify_device:
+      name: "Notification device (optional)"
+      description: "Select a device to send a notification to when the coffee is ready."
+      default: []
+      selector:
+        device:
+          integration: mobile_app
+          multiple: false
+          
+mode: single
+max_exceeded: silent
+trigger:
+  - platform: numeric_state
+    id: t0
+    entity_id: !input power_sensor
+    above: !input start_appliance_power
+    for:
+      seconds: !input start_time_delay
+      
+condition: []
+action:
+  - alias: "Save start time for brewing"
+    variables:
+      brew_start_timestamp: "{{ now().timestamp() }}"
+      
+  - alias: "Wait for the heating phase to complete"
+    wait_for_trigger:
+      - platform: numeric_state
+        entity_id: !input power_sensor
+        below: !input heating_threshold
+    timeout: "00:10:00"
+    
+  - alias: "Wait until the pump turns off"
+    wait_for_trigger:
+      - platform: numeric_state
+        entity_id: !input power_sensor
+        below: !input pump_threshold
+        for:
+          seconds: !input pump_off_time_delay
+    timeout: "00:20:00"
+    
+  - alias: "Calculate number of cups"
+    variables:
+      brew_end_timestamp: "{{ now().timestamp() }}"
+      pump_duration_seconds: "{{ (brew_end_timestamp - brew_start_timestamp) | int }}"
+      seconds_per_cup: !input time_per_cup
+
+  - alias: "Step with variables"
+    variables:
+      delay_seconds: !input pump_off_time_delay
+      
+  - alias: "Set number of cups in input_number"
+    service: input_number.set_value
+    target:
+      entity_id: !input input_number_cups
+    data:
+      value: "{{ ((pump_duration_seconds - delay_seconds) / seconds_per_cup) | round }}"
+      
+  - alias: "Prepare notification content"
+    variables:
+      notify_device_input: !input notify_device
+      cups_entity_input: !input input_number_cups
+      device_name: "{{ device_attr(notify_device_input, 'name') | slugify }}"
+      cups_value: "{{ states(cups_entity_input) }}"
+      
+  - alias: "Send notification"
+    service: "notify.mobile_app_{{ device_name }}"
+    data:
+      title: "Coffee Maker"
+      message: "Coffee is ready! Number of cups: {{ cups_value }}"
