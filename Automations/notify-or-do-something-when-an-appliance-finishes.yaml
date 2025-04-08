@@ -72,7 +72,7 @@ blueprint:
       description: Actions (e.g. pushing a notification, TTS announcement, ...)
       selector:
         action: {}
-  source_url: https://gist.github.com/cmragnar/5823a6cf8b58c253157e73059631bb0d
+  source_url: https://gist.github.com/cmragnar/
 trigger:
 - platform: numeric_state
   entity_id: !input power_sensor
